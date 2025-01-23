@@ -73,6 +73,8 @@ MAP_PROG_ARRAY(cp_progs_jmp_pe_map, __u32, __u32, CP_PROG_PE_NUM, FEATURE_FLAG_P
 MAP_STACK_TRACE(stack_map_a, STACK_MAP_ENTRIES, FEATURE_FLAG_PROFILE_ONCPU)
 MAP_STACK_TRACE(stack_map_b, STACK_MAP_ENTRIES, FEATURE_FLAG_PROFILE_ONCPU)
 
+MAP_HASH(stack_blacklist_map, __u64, __u8, 1, FEATURE_FLAG_PROFILE_ONCPU)
+
 typedef struct {
 	struct bpf_map_def *state;
 	struct bpf_map_def *stack_map_a;
@@ -82,7 +84,14 @@ typedef struct {
 	struct bpf_map_def *profiler_output_a;
 	struct bpf_map_def *profiler_output_b;
 	struct bpf_map_def *progs_jmp;
+	struct bpf_map_def *stack_blacklist_map;
 } map_group_t;
+
+typedef struct {
+	map_group_t maps;
+	bool user_only;
+	bool blacklist;
+} profiler_ctx_t;
 
 #ifdef LINUX_VER_5_2_PLUS
 typedef __u64 __raw_stack[PERF_MAX_STACK_DEPTH];
@@ -169,7 +178,7 @@ MAP_PERARRAY(heap, __u32, unwind_state_t, 1, FEATURE_FLAG_PROFILE_ONCPU | FEATUR
 
 static inline __attribute__ ((always_inline))
 int pre_python_unwind(void *ctx, unwind_state_t * state,
-		 map_group_t *maps, int jmp_idx);
+		 profiler_ctx_t *p_ctx, int jmp_idx);
 
 #else
 
@@ -413,8 +422,9 @@ static inline __attribute__ ((always_inline))
 int collect_stack_and_send_output(struct pt_regs *ctx,
 				  struct stack_trace_key_t *key,
 				  stack_t * stack, stack_t * intp_stack,
-				  map_group_t * maps, bool user_only)
+				  profiler_ctx_t *p_ctx)
 {
+	map_group_t *maps = &p_ctx->maps;
 	__u32 count_idx;
 
 	count_idx = TRANSFER_CNT_IDX;
@@ -496,8 +506,16 @@ int collect_stack_and_send_output(struct pt_regs *ctx,
 		__sync_fetch_and_add(drop_count_ptr, 1);
 	}
 
-	if (user_only && key->userstack < 0) {
+	if (p_ctx->user_only && key->userstack < 0) {
 		return 0;
+	}
+
+	if (p_ctx->blacklist) {
+		__u64 stack_key = key->userstack | ((__u64)key->tgid << 32);
+		__u8 *black = bpf_map_lookup_elem(maps->stack_blacklist_map, &stack_key);
+		if (black != NULL && *black > 0) {
+			return 0;
+		}
 	}
 
 	if (key->userstack < 0 && key->kernstack < 0) {
@@ -535,16 +553,21 @@ int collect_stack_and_send_output(struct pt_regs *ctx,
 	return 0;
 }
 
-static map_group_t oncpu_maps = {.state = &NAME(profiler_state_map),
-	.stack_map_a = &NAME(stack_map_a),
-	.stack_map_b = &NAME(stack_map_b),
-#ifdef LINUX_VER_5_2_PLUS
-	.custom_stack_map_a = &NAME(custom_stack_map_a),
-	.custom_stack_map_b = &NAME(custom_stack_map_b),
-#endif
-	.profiler_output_a = &NAME(profiler_output_a),
-	.profiler_output_b = &NAME(profiler_output_b),
-	.progs_jmp = &NAME(cp_progs_jmp_pe_map),
+static profiler_ctx_t oncpu_ctx = {
+	.maps = {.state = &NAME(profiler_state_map),
+		.stack_map_a = &NAME(stack_map_a),
+		.stack_map_b = &NAME(stack_map_b),
+		#ifdef LINUX_VER_5_2_PLUS
+		.custom_stack_map_a = &NAME(custom_stack_map_a),
+		.custom_stack_map_b = &NAME(custom_stack_map_b),
+		#endif
+		.profiler_output_a = &NAME(profiler_output_a),
+		.profiler_output_b = &NAME(profiler_output_b),
+		.progs_jmp = &NAME(cp_progs_jmp_pe_map),
+		.stack_blacklist_map = NULL,
+	},
+	.user_only = false,
+	.blacklist = false,
 };
 
 PERF_EVENT_PROG(oncpu_profile) (struct bpf_perf_event_data * ctx) {
@@ -596,7 +619,7 @@ PERF_EVENT_PROG(oncpu_profile) (struct bpf_perf_event_data * ctx) {
 	python_unwind_info_t *py_unwind_info =
 	    python_unwind_info_map__lookup(&state->key.tgid);
 	if (py_unwind_info != NULL) {
-		pre_python_unwind(ctx, state, &oncpu_maps, PROG_PYTHON_UNWIND_PE_IDX);
+		pre_python_unwind(ctx, state, &oncpu_ctx, PROG_PYTHON_UNWIND_PE_IDX);
 	}
 
 	process_shard_list_t *shard_list =
@@ -617,7 +640,7 @@ PERF_EVENT_PROG(oncpu_profile) (struct bpf_perf_event_data * ctx) {
 #endif
 
 	return collect_stack_and_send_output(&ctx->regs, key, NULL, NULL,
-					     &oncpu_maps, false);
+					     &oncpu_ctx);
 }
 
 #ifdef LINUX_VER_5_2_PLUS
@@ -686,8 +709,9 @@ __u32 find_unwind_entry(unwind_entry_t * list, __u16 left, __u16 right,
 
 static inline __attribute__ ((always_inline))
 int dwarf_unwind(void *ctx, unwind_state_t * state,
-		 map_group_t *maps, int jmp_idx)
+		 profiler_ctx_t *p_ctx, int jmp_idx)
 {
+	map_group_t *maps = &p_ctx->maps;
 	__u32 count_idx;
 
 	count_idx = SAMPLE_CNT_DROP;
@@ -824,7 +848,7 @@ PROGPE(dwarf_unwind) (struct bpf_perf_event_data * ctx) {
 		return 0;
 	}
 
-	dwarf_unwind(ctx, state, &oncpu_maps, PROG_DWARF_UNWIND_PE_IDX);
+	dwarf_unwind(ctx, state, &oncpu_ctx, PROG_DWARF_UNWIND_PE_IDX);
 
 	bpf_tail_call(ctx, &NAME(cp_progs_jmp_pe_map),
 		      PROG_ONCPU_OUTPUT_PE_IDX);
@@ -906,7 +930,7 @@ __u32 get_symbol_id(symbol_t * symbol)
 
 static inline __attribute__ ((always_inline))
 int pre_python_unwind(void *ctx, unwind_state_t * state,
-		 map_group_t *maps, int jmp_idx) {
+		 profiler_ctx_t *p_ctx, int jmp_idx) {
 	python_unwind_info_t *py_unwind_info =
 	    python_unwind_info_map__lookup(&state->key.tgid);
 	if (py_unwind_info == NULL) {
@@ -942,13 +966,13 @@ int pre_python_unwind(void *ctx, unwind_state_t * state,
         return 0;
 	}
 
-	bpf_tail_call(ctx, maps->progs_jmp, jmp_idx);
+	bpf_tail_call(ctx, p_ctx->maps.progs_jmp, jmp_idx);
 	return 0;
 }
 
 static inline __attribute__ ((always_inline))
 int python_unwind(void *ctx, unwind_state_t * state,
-		 map_group_t *maps, int jmp_idx) {
+		 profiler_ctx_t *p_ctx, int jmp_idx) {
 	if (state->py_frame_ptr == NULL) {
 		goto output;
 	}
@@ -995,7 +1019,7 @@ int python_unwind(void *ctx, unwind_state_t * state,
 	}
 
 	if (++state->runs < UNWIND_PROG_MAX_RUN) {
-		bpf_tail_call(ctx, maps->progs_jmp, jmp_idx);
+		bpf_tail_call(ctx, p_ctx->maps.progs_jmp, jmp_idx);
 	}
 
 output:
@@ -1021,7 +1045,7 @@ PROGPE(python_unwind) (struct bpf_perf_event_data * ctx) {
 		return 0;
 	}
 
-	python_unwind(ctx, state, &oncpu_maps, PROG_PYTHON_UNWIND_PE_IDX);
+	python_unwind(ctx, state, &oncpu_ctx, PROG_PYTHON_UNWIND_PE_IDX);
 
 	process_shard_list_t *shard_list =
 	    process_shard_list_table__lookup(&state->key.tgid);
@@ -1065,7 +1089,7 @@ PROGPE(oncpu_output) (struct bpf_perf_event_data * ctx) {
 	}
 	return collect_stack_and_send_output(&ctx->regs, &state->key,
 					     &state->stack, &state->intp_stack,
-					     &oncpu_maps, false);
+					     &oncpu_ctx);
 }
 
 #endif
