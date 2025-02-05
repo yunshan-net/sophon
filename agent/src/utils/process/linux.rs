@@ -370,11 +370,13 @@ impl ProcessListener {
 
     fn process(
         proc_root: &str,
-        features: &Arc<RwLock<HashMap<String, ProcessNode>>>,
-        user: &String,
+        features: &mut HashMap<String, ProcessNode>,
+        user: &str,
         command: &[String],
     ) {
-        let mut features = features.write().unwrap();
+        if features.is_empty() {
+            return;
+        }
         let Ok(processes) = all_processes_with_root(proc_root) else {
             return;
         };
@@ -390,13 +392,17 @@ impl ProcessListener {
                 HashMap::new()
             }
         };
-        let mut current_processes = vec![];
+        let mut current_pdata = vec![];
         for process in processes {
-            if let Err(e) = process {
-                error!("get process failed: {}", e);
-                continue;
+            match process {
+                Ok(p) => if let Ok(pdata) = ProcessData::try_from(&p) {
+                    current_pdata.push(pdata);
+                }
+                Err(e) => {
+                    error!("get process failed: {}", e);
+                    continue;
+                }
             }
-            current_processes.push(process.unwrap());
         }
 
         for (key, value) in features.iter_mut() {
@@ -408,9 +414,9 @@ impl ProcessListener {
             let mut process_datas = vec![];
 
             for matcher in &value.process_matcher {
-                for process in &current_processes {
-                    if let Some(process_data) = matcher.get_process_data(process, &tags_map) {
-                        pids.push(process.pid() as u32);
+                for pdata in current_pdata.iter() {
+                    if let Some(process_data) = matcher.get_process_data(pdata, &tags_map) {
+                        pids.push(pdata.pid as u32);
                         process_datas.push(process_data);
                     }
                 }
@@ -454,11 +460,11 @@ impl ProcessListener {
                             continue;
                         }
                         count = 0;
-                        let proc = proc_root.read().unwrap().clone();
-                        let user = user.read().unwrap().clone();
-                        let command = command.read().unwrap().clone();
+                        let proc = proc_root.read().unwrap();
+                        let user = user.read().unwrap();
+                        let command = command.read().unwrap();
 
-                        Self::process(proc.as_str(), &features, &user, command.as_slice());
+                        Self::process(&proc, &mut features.write().unwrap(), &user, &command);
                     }
                 })
                 .unwrap(),
