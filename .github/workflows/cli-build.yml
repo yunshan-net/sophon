@@ -50,16 +50,10 @@ jobs:
           GO111MODULE="off" go get github.com/gogo/protobuf/protoc-gen-gogo
           GO111MODULE="off" go get github.com/gogo/protobuf/gogoproto
           GO111MODULE="off" go get github.com/golang/protobuf/protoc-gen-go
-          go install golang.org/x/tools/cmd/stringer@v0.24.0
 
-          cd cli
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make -e BINARY_SUFFIX=.linux-amd64 -e BRANCH=${{ github.ref_name }}
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 make -e BINARY_SUFFIX=.linux-arm64 -e BRANCH=${{ github.ref_name }}
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 make -e BINARY_SUFFIX=.darwin-amd64 -e BRANCH=${{ github.ref_name }}
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 make -e BINARY_SUFFIX=.darwin-arm64 -e BRANCH=${{ github.ref_name }}
-          cd bin/
-          sha256sum * > deepflow-agent.sha256sum.txt
 
+      - name: Setup Debug Session
+        uses: csexton/debugger-action@master
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
