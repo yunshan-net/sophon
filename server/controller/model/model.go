@@ -765,3 +765,12 @@ type MailServer struct {
 	NtlmPassword string `json:"NTLM_PASSWORD"`
 	Lcuuid       string `json:"LCUUID"`
 }
+
+type NativeFieldCreate struct {
+	Database       string `json:"DATABASE" binding:"required"`
+	TableName      string `json:"TABLE_NAME" binding:"required"`
+	Name           string `json:"NAME" binding:"required"`
+	FieldName      string `json:"FIELD_NAME" binding:"required"`
+	FieldValueType string `json:"FIELD_VALUE_TYPE" binding:"required"`
+	TeamID         int    `json:"TEAM_ID"`
+}

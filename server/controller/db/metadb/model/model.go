@@ -570,3 +570,16 @@ type ResourceVersion struct {
 	CreatedAt time.Time `gorm:"autoCreateTime;column:created_at;type:datetime" json:"CREATED_AT"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime;column:updated_at;type:datetime" json:"UPDATED_AT"`
 }
+
+type NativeField struct {
+	ID             int       `gorm:"primaryKey;column:id;type:int;not null;autoIncrement" json:"ID"`
+	Database       string    `gorm:"column:database;type:varchar(64)" json:"DATABASE"`
+	TableName      string    `gorm:"column:table_name;type:varchar(64)" json:"TABLE_NAME"`
+	Name           string    `gorm:"column:name;type:varchar(64)" json:"NAME"`
+	FieldName      string    `gorm:"column:field_name;type:varchar(64)" json:"FIELD_NAME"`
+	FieldValueType string    `gorm:"column:field_value_type;type:varchar(64)" json:"FIELD_VALUE_TYPE"`
+	TeamID         int       `gorm:"column:team_id;type:int;default:1" json:"TEAM_ID"`
+	Lcuuid         string    `gorm:"column:lcuuid;type:char(36);default:null" json:"LCUUID"`
+	CreatedAt      time.Time `gorm:"autoCreateTime;column:created_at;type:datetime" json:"CREATED_AT"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime;column:updated_at;type:datetime" json:"UPDATED_AT"`
+}
