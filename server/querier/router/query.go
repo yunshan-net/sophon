@@ -21,10 +21,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	logging "github.com/op/go-logging"
 
 	"github.com/deepflowio/deepflow/server/querier/common"
 	"github.com/deepflowio/deepflow/server/querier/service"
 )
+
+var log = logging.MustGetLogger("tracemap")
 
 func QueryRouter(e *gin.Engine) {
 	e.POST("/v1/query/", executeQuery())
@@ -74,6 +77,8 @@ func executeQuery() gin.HandlerFunc {
 		if args.SimpleSql {
 			result, debug, err = service.SimpleExecute(&args)
 		} else {
+			log.Infof("%+v", args)
+			log.Infof("%+v", c.Request.PostForm)
 			result, debug, err = service.Execute(&args)
 		}
 		if err == nil && args.Debug != "true" {

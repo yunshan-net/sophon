@@ -149,6 +149,7 @@ func doRequest(req *http.Request, url string, options ...HeaderOption) (*simplej
 // CURLForm 调用 deepflow 其他服务 API 并获取返回结果，Content-Type 为 application/x-www-form-urlencoded
 func CURLForm(method string, url string, values url.Values, options ...HeaderOption) (*simplejson.Json, error) {
 	log.Debugf("curl form: %s %s %+v", method, url, values)
+	log.Infof("tracemap %+v", strings.NewReader(values.Encode()))
 	req, err := http.NewRequest(method, url, strings.NewReader(values.Encode()))
 	if err != nil {
 		log.Error(err)
