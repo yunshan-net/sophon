@@ -669,12 +669,13 @@ static void set_stack_trace_msg(struct profiler_context *ctx,
 	msg->k_stack_id = (u32) v->kernstack;
 	strcpy_s_inline(msg->comm, sizeof(msg->comm), v->comm, strlen(v->comm));
 	msg->stime = stime;
-	msg->netns_id = ns_id;
+	if (matched)
+		msg->netns_id = ns_id;
 	msg->profiler_type = ctx->type;
 	if (ctx->type == PROFILER_TYPE_MEMORY) {
 		msg->mem_addr = v->memory.addr;
 	}
-	if (container_id != NULL) {
+	if (container_id != NULL && matched) {
 		strcpy_s_inline(msg->container_id, sizeof(msg->container_id),
 				container_id, strlen(container_id));
 	}
